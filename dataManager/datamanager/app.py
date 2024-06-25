@@ -33,16 +33,20 @@ def procesar_datos(input_file, incubadora_file, output_folder):
             for line in lines:
                 if 'INFO  co2sens' in line:
                     try:
+                        # Dividir la línea por espacios y verificar la longitud mínima esperada
+                        parts = line.split()
+                        if len(parts) < 7:
+                            raise ValueError("Formato de línea inesperado")
+
                         # Obtener timestamp
-                        timestamp = line.split()[0] + ' ' + line.split()[1]
+                        timestamp = parts[0] + ' ' + parts[1]
                         
                         # Obtener número de sensor (co2sens9, co2sens11, co2sens13)
-                        co2sens = line.split()[3]
+                        co2sens = parts[3]
                         
                         # Obtener mediciones de CO2 y temperaturas
-                        parts = line.split()
-                        co2_1 = float(parts[4].split('=')[1]) / 10000  # Dividir por 10000 para convertir a %
-                        co2_3 = float(parts[6].split('=')[1])  # Mantener sin cambios
+                        co2_1 = float(parts[4].split('=')[1].replace(',', '.')) / 10000  # Dividir por 10000 para convertir a % y reemplazar comas por puntos
+                        co2_3 = float(parts[6].split('=')[1].replace(',', '.'))  # Mantener sin cambios y reemplazar comas por puntos
                         
                         # Crear la fila de datos en el formato requerido
                         data_row = (timestamp, co2sens, co2_1, co2_3)
@@ -70,10 +74,15 @@ def procesar_datos(input_file, incubadora_file, output_folder):
             incubadora_df['Número de Sensor'] = 'Incubadora'
             
             # Seleccionar y reordenar las columnas de incubadora_formateado
+            # Asegurarse de que el CO2 está en la columna 'Concentración CO2 (%)' y la temperatura en 'Temperatura (°C)'
             incubadora_df_reordered = incubadora_df[['Timestamp', 'Número de Sensor', incubadora_df.columns[4], incubadora_df.columns[3]]]
             
             # Renombrar las columnas para que coincidan con datos_df
-            incubadora_df_reordered.columns = ['Timestamp', 'Número de Sensor', 'Temperatura (°C)', 'Concentración CO2 (%)']
+            incubadora_df_reordered.columns = ['Timestamp', 'Número de Sensor', 'Concentración CO2 (%)', 'Temperatura (°C)']
+            
+            # Convertir columnas a float después de reemplazar comas por puntos
+            incubadora_df_reordered['Concentración CO2 (%)'] = incubadora_df_reordered['Concentración CO2 (%)'].str.replace(',', '.').astype(float)
+            incubadora_df_reordered['Temperatura (°C)'] = incubadora_df_reordered['Temperatura (°C)'].str.replace(',', '.').astype(float)
             
             # Concatenar los datos
             combined_df = pd.concat([datos_df, incubadora_df_reordered], ignore_index=True)
@@ -127,7 +136,7 @@ def aplicacion_visualizacion():
         
         # Filtrar el DataFrame por el rango de fecha y hora seleccionado
         mask = (df[date_column] >= start_datetime) & (df[date_column] <= end_datetime)
-        df_filtered = df[mask]
+        df_filtered = df.loc[mask]
         
         # Mostrar el dataframe filtrado
         st.write("Datos filtrados del archivo Excel:")
@@ -140,8 +149,11 @@ def aplicacion_visualizacion():
         
         # Crear gráficos combinados por Número de Sensor
         for y_axis in y_axes:
-            df_filtered = df_filtered[pd.to_numeric(df_filtered[y_axis], errors='coerce').notnull()]
-            df_filtered[y_axis] = df_filtered[y_axis].astype(float)
+            # Asegurar que los valores sean tratados como string antes de reemplazar y convertir
+            if df_filtered[y_axis].dtype != 'object':
+                df_filtered[y_axis] = df_filtered[y_axis].astype(str)
+            
+            df_filtered.loc[:, y_axis] = pd.to_numeric(df_filtered[y_axis].str.replace(',', '.'), errors='coerce')
         
         # Graficar usando Plotly Express
         st.write("Gráfico combinado con Plotly Express:")
@@ -166,20 +178,17 @@ if __name__ == "__main__":
     if opcion_seleccionada == "Procesamiento de Datos":
         st.subheader("Procesamiento de Datos")
 
-        # Sección para seleccionar los archivos de entrada y la carpeta de salida
-        st.sidebar.header("Configuración de Archivos")
-        input_file = st.sidebar.file_uploader("Selecciona el archivo de texto", type="txt")
-        incubadora_file = st.sidebar.file_uploader("Selecciona el archivo Excel de la incubadora", type="xlsx")
-        output_folder = st.sidebar.text_input("Selecciona la carpeta de salida", value=os.getcwd())
+        # Sección para seleccionar los archivos y la carpeta de salida
+        uploaded_text_file = st.file_uploader("Sube el archivo de texto (.txt)", type=["txt"])
+        uploaded_excel_file = st.file_uploader("Sube el archivo de Excel de la incubadora (.xlsx)", type=["xlsx"])
+        output_folder = st.text_input("Ingresa la carpeta de salida para guardar el archivo combinado:", value="output")
 
-        if st.sidebar.button("Procesar Archivos"):
-            if input_file is not None and incubadora_file is not None:
-                procesar_datos(input_file, incubadora_file, output_folder)
+        if st.button("Procesar Datos"):
+            if uploaded_text_file is not None and uploaded_excel_file is not None:
+                procesar_datos(uploaded_text_file, uploaded_excel_file, output_folder)
             else:
-                st.sidebar.warning("Por favor, selecciona ambos archivos de entrada.")
-
+                st.warning("Por favor, sube ambos archivos para continuar.")
+    
     elif opcion_seleccionada == "Visualización de Datos":
         st.subheader("Visualización de Datos")
-
-        # Llamar directamente a la aplicación de visualización
         aplicacion_visualizacion()
